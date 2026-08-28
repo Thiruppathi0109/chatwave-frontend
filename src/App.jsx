@@ -7,7 +7,7 @@ import {
 // ---- Backend connection ----
 // Make sure the Node.js backend (chatwave-backend) is running on port 4000
 // before joining a room.
-const SOCKET_URL = "http://localhost:4000";
+const SOCKET_URL = "https://chatwave-backend-gxkw.onrender.com";
 
 const DEFAULT_ROOMS = ["General", "Random", "Tech Talk", "Gaming"];
 
