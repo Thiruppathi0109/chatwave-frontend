@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { io } from "socket.io-client";
 import {
   MessageCircle, Send, Users, LogOut, Hash, Plus, Circle,
+  Paperclip, Download, Copy, Trash2, X, MoreVertical, Check,
 } from "lucide-react";
 
 // ---- Backend connection ----
-// Make sure the Node.js backend (chatwave-backend) is running on port 4000
-// before joining a room.
-const SOCKET_URL = "https://chatwave-backend-gxkw.onrender.com";
+// Make sure the Node.js backend (chatwave-backend) is running before joining a room.
+const SOCKET_URL = "http://localhost:4000";
 
 const DEFAULT_ROOMS = ["General", "Random", "Tech Talk", "Gaming"];
 
@@ -30,6 +30,48 @@ function avatarColor(name) {
 function formatTime(iso) {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+
+function fileUrlFull(url) {
+  if (!url) return url;
+  return url.startsWith("http") ? url : `${SOCKET_URL}${url}`;
+}
+
+async function downloadFile(url, filename) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename || "chatwave-file";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    window.open(url, "_blank");
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function copyImage(url) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function JoinScreen({ onJoin }) {
@@ -140,16 +182,174 @@ function JoinScreen({ onJoin }) {
   );
 }
 
+function MessageActions({ message, isOwn, onDeleteForMe, onDeleteForEveryone }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  const handleCopy = async () => {
+    let ok = false;
+    if (message.fileType === "image") {
+      ok = await copyImage(fileUrlFull(message.fileUrl));
+      if (!ok) ok = await copyText(fileUrlFull(message.fileUrl)); // fallback: copy link
+    } else if (message.text) {
+      ok = await copyText(message.text);
+    }
+    setCopied(ok);
+    setTimeout(() => setCopied(false), 1500);
+    setOpen(false);
+  };
+
+  const handleDownload = () => {
+    downloadFile(fileUrlFull(message.fileUrl), message.fileName);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={menuRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          background: "none", border: "none", cursor: "pointer", color: "#5B6272",
+          display: "flex", alignItems: "center", padding: 2, opacity: 0.8,
+        }}
+        title="Message options"
+      >
+        <MoreVertical size={15} />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: isOwn ? 0 : "auto", left: isOwn ? "auto" : 0,
+          marginTop: 4, background: "#242A36", border: "1px solid #343B49", borderRadius: 8,
+          minWidth: 170, zIndex: 20, boxShadow: "0 6px 18px rgba(0,0,0,0.35)", overflow: "hidden",
+        }}>
+          {(message.text || message.fileType === "image") && (
+            <button onClick={handleCopy} style={menuItemStyle}>
+              {copied ? <Check size={14} color="#5CC9A7" /> : <Copy size={14} />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+          )}
+          {message.fileUrl && (
+            <button onClick={handleDownload} style={menuItemStyle}>
+              <Download size={14} /> Download
+            </button>
+          )}
+          <button onClick={() => { onDeleteForMe(); setOpen(false); }} style={menuItemStyle}>
+            <Trash2 size={14} /> Delete for me
+          </button>
+          {isOwn && (
+            <button onClick={() => { onDeleteForEveryone(); setOpen(false); }} style={{ ...menuItemStyle, color: "#E27878" }}>
+              <Trash2 size={14} /> Delete for everyone
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const menuItemStyle = {
+  width: "100%", background: "none", border: "none", cursor: "pointer", color: "#D5D8DE",
+  fontSize: 13, padding: "9px 12px", display: "flex", alignItems: "center", gap: 8,
+  textAlign: "left",
+};
+
+function MessageBubble({ message, isOwn, onDeleteForMe, onDeleteForEveryone }) {
+  if (message.deleted) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: isOwn ? "flex-end" : "flex-start", margin: "6px 0" }}>
+        <div style={{
+          maxWidth: "60%", padding: "9px 14px", borderRadius: 14, background: "#1B202A",
+          color: "#5B6272", fontSize: 13, fontStyle: "italic", display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Trash2 size={13} /> This message was deleted
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex", flexDirection: "column",
+        alignItems: isOwn ? "flex-end" : "flex-start", margin: "6px 0",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+        {isOwn && (
+          <MessageActions
+            message={message} isOwn={isOwn}
+            onDeleteForMe={onDeleteForMe} onDeleteForEveryone={onDeleteForEveryone}
+          />
+        )}
+        <span style={{ fontSize: 11, color: "#5B6272" }}>
+          {isOwn ? "You" : message.username} · {formatTime(message.time)}
+        </span>
+        {!isOwn && (
+          <MessageActions
+            message={message} isOwn={isOwn}
+            onDeleteForMe={onDeleteForMe} onDeleteForEveryone={onDeleteForEveryone}
+          />
+        )}
+      </div>
+
+      {message.fileUrl && message.fileType === "image" && (
+        <img
+          src={fileUrlFull(message.fileUrl)}
+          alt={message.fileName || "shared image"}
+          onClick={() => window.open(fileUrlFull(message.fileUrl), "_blank")}
+          style={{
+            maxWidth: 260, maxHeight: 260, borderRadius: 12, cursor: "pointer",
+            border: "1px solid #2C323F", display: "block", marginBottom: message.text ? 6 : 0,
+          }}
+        />
+      )}
+      {message.fileUrl && message.fileType === "video" && (
+        <video
+          src={fileUrlFull(message.fileUrl)}
+          controls
+          style={{ maxWidth: 260, maxHeight: 260, borderRadius: 12, border: "1px solid #2C323F", display: "block", marginBottom: message.text ? 6 : 0 }}
+        />
+      )}
+
+      {message.text && (
+        <div style={{
+          maxWidth: "60%", padding: "9px 14px", borderRadius: 14,
+          background: isOwn ? "#5CC9A7" : "#242A36",
+          color: isOwn ? "#0E1116" : "#F2F3F5",
+          fontSize: 14, lineHeight: 1.45, wordBreak: "break-word",
+          borderBottomRightRadius: isOwn ? 4 : 14,
+          borderBottomLeftRadius: isOwn ? 14 : 4,
+        }}>
+          {message.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatScreen({ username, room, onLeave }) {
   const [messages, setMessages] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
   const [draft, setDraft] = useState("");
   const [connected, setConnected] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [locallyDeleted, setLocallyDeleted] = useState(new Set());
 
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     const socket = io(SOCKET_URL);
@@ -161,30 +361,23 @@ function ChatScreen({ username, room, onLeave }) {
     });
 
     socket.on("disconnect", () => setConnected(false));
-
     socket.on("chat-history", (history) => setMessages(history));
-
-    socket.on("new-message", (message) => {
-      setMessages((prev) => [...prev, message]);
-    });
-
+    socket.on("new-message", (message) => setMessages((prev) => [...prev, message]));
     socket.on("system-message", (text) => {
       setMessages((prev) => [...prev, { id: `sys-${Date.now()}`, system: true, text }]);
     });
-
     socket.on("presence-update", (users) => setOnlineUsers(users));
-
     socket.on("user-typing", (name) => {
       setTypingUsers((prev) => (prev.includes(name) ? prev : [...prev, name]));
     });
-
     socket.on("user-stop-typing", (name) => {
       setTypingUsers((prev) => prev.filter((u) => u !== name));
     });
+    socket.on("message-deleted", ({ messageId }) => {
+      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, deleted: true, text: null, fileUrl: null } : m)));
+    });
 
-    return () => {
-      socket.disconnect();
-    };
+    return () => socket.disconnect();
   }, [username, room]);
 
   useEffect(() => {
@@ -197,19 +390,52 @@ function ChatScreen({ username, room, onLeave }) {
     if (!socket) return;
     socket.emit("typing");
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      socket.emit("stop-typing");
-    }, 1200);
+    typingTimeoutRef.current = setTimeout(() => socket.emit("stop-typing"), 1200);
   };
 
   const sendMessage = (e) => {
     e.preventDefault();
     const text = draft.trim();
     if (!text || !socketRef.current) return;
-    socketRef.current.emit("send-message", text);
+    socketRef.current.emit("send-message", { text });
     socketRef.current.emit("stop-typing");
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     setDraft("");
+  };
+
+  const handleFilePick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so picking the same file again still fires change
+    if (!file) return;
+
+    if (file.size > 25 * 1024 * 1024) {
+      alert("File is too large. Max size is 25 MB.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`${SOCKET_URL}/upload`, { method: "POST", body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Upload failed");
+      socketRef.current.emit("send-message", {
+        fileUrl: data.url, fileType: data.type, fileName: data.name,
+      });
+    } catch (err) {
+      alert(err.message || "Could not send the file. Make sure the backend is running.");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const deleteForMe = (id) => {
+    setLocallyDeleted((prev) => new Set(prev).add(id));
+  };
+
+  const deleteForEveryone = (id) => {
+    socketRef.current?.emit("delete-message", { messageId: id, forEveryone: true });
   };
 
   const typingLabel = useMemo(() => {
@@ -219,6 +445,8 @@ function ChatScreen({ username, room, onLeave }) {
     if (others.length === 2) return `${others[0]} and ${others[1]} are typing...`;
     return "Several people are typing...";
   }, [typingUsers, username]);
+
+  const visibleMessages = messages.filter((m) => !locallyDeleted.has(m.id));
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "#161A22", fontFamily: "'Inter', sans-serif" }}>
@@ -307,7 +535,7 @@ function ChatScreen({ username, room, onLeave }) {
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 24px", display: "flex", flexDirection: "column", gap: 4 }}>
-          {messages.map((m) =>
+          {visibleMessages.map((m) =>
             m.system ? (
               <div key={m.id} style={{ textAlign: "center", margin: "8px 0" }}>
                 <span style={{ fontSize: 12, color: "#5B6272", background: "#1E232D", padding: "4px 12px", borderRadius: 999 }}>
@@ -315,41 +543,48 @@ function ChatScreen({ username, room, onLeave }) {
                 </span>
               </div>
             ) : (
-              <div
+              <MessageBubble
                 key={m.id}
-                style={{
-                  display: "flex", flexDirection: "column",
-                  alignItems: m.username === username ? "flex-end" : "flex-start", margin: "6px 0",
-                }}
-              >
-                <span style={{ fontSize: 11, color: "#5B6272", margin: "0 0 3px" }}>
-                  {m.username === username ? "You" : m.username} · {formatTime(m.time)}
-                </span>
-                <div style={{
-                  maxWidth: "60%", padding: "9px 14px", borderRadius: 14,
-                  background: m.username === username ? "#5CC9A7" : "#242A36",
-                  color: m.username === username ? "#0E1116" : "#F2F3F5",
-                  fontSize: 14, lineHeight: 1.45, wordBreak: "break-word",
-                  borderBottomRightRadius: m.username === username ? 4 : 14,
-                  borderBottomLeftRadius: m.username === username ? 14 : 4,
-                }}>
-                  {m.text}
-                </div>
-              </div>
+                message={m}
+                isOwn={m.username === username}
+                onDeleteForMe={() => deleteForMe(m.id)}
+                onDeleteForEveryone={() => deleteForEveryone(m.id)}
+              />
             )
           )}
           <div ref={messagesEndRef} />
         </div>
 
         <div style={{ padding: "6px 24px", height: 20 }}>
-          {typingLabel && (
+          {uploading ? (
+            <span style={{ fontSize: 12, color: "#8B93A3" }}>Uploading file...</span>
+          ) : typingLabel ? (
             <span style={{ fontSize: 12, color: "#8B93A3", fontStyle: "italic" }}>{typingLabel}</span>
-          )}
+          ) : null}
         </div>
 
         <form onSubmit={sendMessage} style={{
           padding: "12px 24px 20px", display: "flex", gap: 10, alignItems: "center",
         }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            onChange={handleFilePick}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Send a photo or video"
+            style={{
+              background: "#1E232D", border: "1px solid #2C323F", borderRadius: 10, width: 42, height: 42,
+              display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+              flexShrink: 0, color: "#8B93A3",
+            }}
+          >
+            <Paperclip size={17} />
+          </button>
           <input
             value={draft}
             onChange={(e) => handleDraftChange(e.target.value)}
